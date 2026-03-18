@@ -8,7 +8,10 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
+           .EnableDetailedErrors()
+           .EnableSensitiveDataLogging()
+           .LogTo(Console.WriteLine, LogLevel.Information));
 
 var app = builder.Build();
 
@@ -51,9 +54,6 @@ app.MapPost("/products", async (AppDbContext db, Product product) =>
     await db.SaveChangesAsync();
     return Results.Created($"/products/{product.Id}", product);
 });
-
-app.MapGet("/products", async (AppDbContext db) =>
-    await db.Products.AsNoTracking().OrderBy(p => p.Id).ToListAsync());
 
 // ---- Orders ----
 // Request DTOs keep endpoints clean
@@ -152,6 +152,35 @@ app.MapPost("/orders/{orderId:int}/assign-agent/{agentId:int}", async (AppDbCont
     await db.SaveChangesAsync();
     return Results.NoContent();
 });
+
+app.MapPost("/products/physical", async (AppDbContext db, PhysicalProduct p) =>
+{
+    db.PhysicalProducts.Add(p);
+    await db.SaveChangesAsync();
+    return Results.Created($"/products/{p.Id}", p);
+});
+
+app.MapPost("/products/digital", async (AppDbContext db, DigitalProduct p) =>
+{
+    db.DigitalProducts.Add(p);
+    await db.SaveChangesAsync();
+    return Results.Created($"/products/{p.Id}", p);
+});
+
+app.MapPost("/products/subscription", async (AppDbContext db, SubscriptionProduct p) =>
+{
+    db.SubscriptionProducts.Add(p);
+    await db.SaveChangesAsync();
+    return Results.Created($"/products/{p.Id}", p);
+});
+
+// Polymorphic query (base)
+app.MapGet("/products", async (AppDbContext db) =>
+    await db.Products.AsNoTracking().OrderBy(p => p.Id).ToListAsync());
+
+// Derived query (predicate/join/union depending on strategy)
+app.MapGet("/products/physical", async (AppDbContext db) =>
+    await db.Products.OfType<PhysicalProduct>().AsNoTracking().OrderBy(p => p.Id).ToListAsync());
 
 app.Run();
 

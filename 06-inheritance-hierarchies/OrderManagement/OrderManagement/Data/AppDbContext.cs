@@ -9,6 +9,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 {
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Product> Products => Set<Product>();
+    public DbSet<PhysicalProduct> PhysicalProducts => Set<PhysicalProduct>();
+    public DbSet<DigitalProduct> DigitalProducts => Set<DigitalProduct>();
+    public DbSet<SubscriptionProduct> SubscriptionProducts => Set<SubscriptionProduct>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderLine> OrderLines => Set<OrderLine>();
     public DbSet<Tag> Tags => Set<Tag>();
@@ -21,17 +24,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     {
         modelBuilder.HasDefaultSchema("shop");
 
+        ConfigureProductHierarchy(modelBuilder, InheritanceMappingStrategy.Tph);
+
         modelBuilder.Entity<Customer>(b =>
         {
             b.ComplexProperty(c => c.BillingAddress, a =>
             {
-                a.IsRequired(false); // BillingAddress can be null :contentReference[oaicite:1]{index=1}
+                a.IsRequired(false);
 
-                // Shadow discriminator column (nullable) marks presence
                 a.HasDiscriminator<bool?>("BillPresent")
-                 .HasValue(true); // value when the complex object is present :contentReference[oaicite:2]{index=2}
+                 .HasValue(true);
 
-                ConfigureAddress(a, prefix: "Bill", required: false); // your existing column naming
+                ConfigureAddress(a, prefix: "Bill", required: false);
             });
 
             b.ComplexProperty(c => c.ShippingAddress, a =>
@@ -52,7 +56,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasForeignKey(l => l.OrderId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Shadow FK to keep Order clean: SalesAgentId column exists, but no property in Order
             b.Property<int?>("SalesAgentId");
 
             b.HasOne(o => o.SalesAgent)
@@ -71,7 +74,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             b.HasOne(ol => ol.Product)
              .WithMany()
              .HasForeignKey(ol => ol.ProductId)
-             .OnDelete(DeleteBehavior.Restrict); // keep order history stable
+             .OnDelete(DeleteBehavior.Restrict);
 
             b.ComplexProperty(ol => ol.UnitPrice, m =>
             {
@@ -95,7 +98,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         modelBuilder.Entity<CustomerProfile>(b =>
         {
-            // Shadow key/FK column "CustomerId" (no property in class)
             b.Property<int>("CustomerId");
             b.HasKey("CustomerId");
 
@@ -152,14 +154,121 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.ApplyConfiguration(new ProductConfiguration());
     }
 
+    private static void ConfigureProductHierarchy(ModelBuilder modelBuilder, InheritanceMappingStrategy strategy)
+    {
+        // Derived-only complex type example
+        modelBuilder.Entity<PhysicalProduct>()
+            .ComplexProperty(p => p.Dimensions, d =>
+            {
+                d.Property(x => x.LengthCm).HasColumnName("DimLengthCm").HasPrecision(9, 2);
+                d.Property(x => x.WidthCm).HasColumnName("DimWidthCm").HasPrecision(9, 2);
+                d.Property(x => x.HeightCm).HasColumnName("DimHeightCm").HasPrecision(9, 2);
+            });
+
+        // Strategy-specific configuration
+        switch (strategy)
+        {
+            case InheritanceMappingStrategy.Tph:
+                ConfigureTph(modelBuilder);
+                break;
+
+            case InheritanceMappingStrategy.Tpt:
+                ConfigureTpt(modelBuilder);
+                break;
+
+            case InheritanceMappingStrategy.Tpc:
+                ConfigureTpc(modelBuilder);
+                break;
+        }
+    }
+
+    private static void ConfigureTph(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Product>(b =>
+        {
+            // Explicit TPH configuration (TPH is default, but we do it to teach it)
+            // IMPORTANT: Use a NON-default discriminator name to avoid a reported EF Core 10 regression
+            // with the default name "Discriminator". :contentReference[oaicite:2]{index=2}
+            var d = b.HasDiscriminator<ProductKind>("ProductKind");
+
+            d.HasValue<PhysicalProduct>(ProductKind.Physical);
+            d.HasValue<DigitalProduct>(ProductKind.Digital);
+            d.HasValue<SubscriptionProduct>(ProductKind.Subscription);
+
+            // Permutation #1: incomplete mapping so unknown discriminator rows don’t throw,
+            // and queries always include a discriminator predicate. :contentReference[oaicite:3]{index=3}
+            // d.IsComplete(false);
+
+            // Permutation #2: discriminator as string (instead of enum/int)
+            // b.HasDiscriminator<string>("ProductKind")
+            //  .HasValue<PhysicalProduct>("physical")
+            //  .HasValue<DigitalProduct>("digital")
+            //  .HasValue<SubscriptionProduct>("subscription");
+        });
+
+        // Permutation #3: Shared column across sibling types
+        // By default, sibling properties with same name map to separate columns;
+        // you can force them into one shared column if types match. :contentReference[oaicite:4]{index=4}
+        modelBuilder.Entity<PhysicalProduct>()
+            .Property(p => p.Manufacturer)
+            .HasColumnName("Manufacturer");
+
+        modelBuilder.Entity<DigitalProduct>()
+            .Property(p => p.Manufacturer)
+            .HasColumnName("Manufacturer");
+
+        // Extra: enforce “no useless nulls” via CHECK constraints (great for showing TPH drawbacks)
+        // Here we’re saying: if ProductKind is Physical then WeightKg must be non-null / > 0, etc.
+        modelBuilder.Entity<Product>().ToTable(t => t.HasCheckConstraint(
+            "CK_Products_Physical_RequiresWeight",
+            "([ProductKind] <> 1) OR ([WeightKg] IS NOT NULL AND [WeightKg] > 0)"));
+
+        modelBuilder.Entity<Product>().ToTable(t => t.HasCheckConstraint(
+            "CK_Products_Digital_RequiresUrl",
+            "([ProductKind] <> 2) OR ([DownloadUrl] IS NOT NULL AND [DownloadUrl] <> '')"));
+    }
+
+    private static void ConfigureTpt(ModelBuilder modelBuilder)
+    {
+        // Root switches to TPT; tables per type
+        modelBuilder.Entity<Product>(b =>
+        {
+            b.UseTptMappingStrategy();
+            b.ToTable("Products");
+        });
+
+        modelBuilder.Entity<PhysicalProduct>().ToTable("PhysicalProducts");
+        modelBuilder.Entity<DigitalProduct>().ToTable("DigitalProducts");
+        modelBuilder.Entity<SubscriptionProduct>().ToTable("SubscriptionProducts");
+    }
+
+    private static void ConfigureTpc(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Product>(b =>
+        {
+            b.UseTpcMappingStrategy();
+        });
+
+        // Table per concrete class
+        modelBuilder.Entity<PhysicalProduct>().ToTable("PhysicalProducts");
+        modelBuilder.Entity<DigitalProduct>().ToTable("DigitalProducts");
+        modelBuilder.Entity<SubscriptionProduct>().ToTable("SubscriptionProducts");
+
+        // Permutation: identity-based keys with non-overlapping ranges
+        // modelBuilder.Entity<PhysicalProduct>().ToTable("PhysicalProducts",
+        //     tb => tb.Property(e => e.Id).UseIdentityColumn(1, 3));
+        // modelBuilder.Entity<DigitalProduct>().ToTable("DigitalProducts",
+        //     tb => tb.Property(e => e.Id).UseIdentityColumn(2, 3));
+        // modelBuilder.Entity<SubscriptionProduct>().ToTable("SubscriptionProducts",
+        //     tb => tb.Property(e => e.Id).UseIdentityColumn(3, 3));
+    }
+
     private static void ConfigureAddress(ComplexPropertyBuilder<Address> a, string prefix, bool required)
     {
-        // Column naming + types + lengths
         ConfigureString(a.Property(x => x.Street), $"{prefix}Street", 200, required);
         ConfigureString(a.Property(x => x.City), $"{prefix}City", 100, required);
         ConfigureString(a.Property(x => x.PostalCode), $"{prefix}PostalCode", 20, required);
 
-        // ISO2, fixed-length, non-unicode
         var country = a.Property(x => x.CountryCode)
             .HasColumnName($"{prefix}CountryCode")
             .HasColumnType("char(2)")
@@ -171,7 +280,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     private static void ConfigureMoney(ComplexPropertyBuilder<Money> m, string amountColumn, string currencyColumn)
     {
-        // Fixes your decimal warning and makes precision explicit
         m.Property(x => x.Amount)
          .HasColumnName(amountColumn)
          .HasPrecision(18, 2);
