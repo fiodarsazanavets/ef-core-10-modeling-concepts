@@ -24,7 +24,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     {
         modelBuilder.HasDefaultSchema("shop");
 
-        ConfigureProductHierarchy(modelBuilder, InheritanceMappingStrategy.Tph);
+        ConfigureProductHierarchy(modelBuilder, InheritanceMappingStrategy.Tpt);
 
         modelBuilder.Entity<Customer>(b =>
         {
@@ -91,11 +91,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             });
         });
 
-        modelBuilder.Entity<Product>(b =>
-        {
-            b.ComplexProperty(p => p.Price, m => ConfigureMoney(m, amountColumn: "Price", currencyColumn: "PriceCurrency"));
-        });
-
         modelBuilder.Entity<CustomerProfile>(b =>
         {
             b.Property<int>("CustomerId");
@@ -151,20 +146,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         });
 
         modelBuilder.ApplyConfiguration(new CustomerConfiguration());
-        modelBuilder.ApplyConfiguration(new ProductConfiguration());
     }
 
     private static void ConfigureProductHierarchy(ModelBuilder modelBuilder, InheritanceMappingStrategy strategy)
     {
-        // Derived-only complex type example
-        modelBuilder.Entity<PhysicalProduct>()
-            .ComplexProperty(p => p.Dimensions, d =>
-            {
-                d.Property(x => x.LengthCm).HasColumnName("DimLengthCm").HasPrecision(9, 2);
-                d.Property(x => x.WidthCm).HasColumnName("DimWidthCm").HasPrecision(9, 2);
-                d.Property(x => x.HeightCm).HasColumnName("DimHeightCm").HasPrecision(9, 2);
-            });
-
         // Strategy-specific configuration
         switch (strategy)
         {
@@ -186,29 +171,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     {
         modelBuilder.Entity<Product>(b =>
         {
-            // Explicit TPH configuration (TPH is default, but we do it to teach it)
-            // IMPORTANT: Use a NON-default discriminator name to avoid a reported EF Core 10 regression
-            // with the default name "Discriminator". :contentReference[oaicite:2]{index=2}
-            var d = b.HasDiscriminator<ProductKind>("ProductKind");
+            var d = b.HasDiscriminator<string>("ProductKind")
+              .HasValue<PhysicalProduct>("physical")
+              .HasValue<DigitalProduct>("digital")
+              .HasValue<SubscriptionProduct>("subscription");
 
-            d.HasValue<PhysicalProduct>(ProductKind.Physical);
-            d.HasValue<DigitalProduct>(ProductKind.Digital);
-            d.HasValue<SubscriptionProduct>(ProductKind.Subscription);
-
-            // Permutation #1: incomplete mapping so unknown discriminator rows don’t throw,
-            // and queries always include a discriminator predicate. :contentReference[oaicite:3]{index=3}
-            // d.IsComplete(false);
-
-            // Permutation #2: discriminator as string (instead of enum/int)
-            // b.HasDiscriminator<string>("ProductKind")
-            //  .HasValue<PhysicalProduct>("physical")
-            //  .HasValue<DigitalProduct>("digital")
-            //  .HasValue<SubscriptionProduct>("subscription");
+            d.IsComplete(false);
         });
 
-        // Permutation #3: Shared column across sibling types
-        // By default, sibling properties with same name map to separate columns;
-        // you can force them into one shared column if types match. :contentReference[oaicite:4]{index=4}
         modelBuilder.Entity<PhysicalProduct>()
             .Property(p => p.Manufacturer)
             .HasColumnName("Manufacturer");
@@ -217,8 +187,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .Property(p => p.Manufacturer)
             .HasColumnName("Manufacturer");
 
-        // Extra: enforce “no useless nulls” via CHECK constraints (great for showing TPH drawbacks)
-        // Here we’re saying: if ProductKind is Physical then WeightKg must be non-null / > 0, etc.
         modelBuilder.Entity<Product>().ToTable(t => t.HasCheckConstraint(
             "CK_Products_Physical_RequiresWeight",
             "([ProductKind] <> 1) OR ([WeightKg] IS NOT NULL AND [WeightKg] > 0)"));
@@ -235,11 +203,26 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         {
             b.UseTptMappingStrategy();
             b.ToTable("Products");
+            b.OwnsOne(p => p.Price, m =>
+            {
+                m.Property(x => x.Amount).HasColumnName("Price").HasPrecision(18, 2);
+                m.Property(x => x.Currency).HasColumnName("PriceCurrency")
+                    .HasColumnType("char(3)").IsUnicode(false).IsFixedLength()
+                    .HasDefaultValue("USD");
+            });
+            b.Navigation(p => p.Price).IsRequired();
         });
 
         modelBuilder.Entity<PhysicalProduct>().ToTable("PhysicalProducts");
         modelBuilder.Entity<DigitalProduct>().ToTable("DigitalProducts");
         modelBuilder.Entity<SubscriptionProduct>().ToTable("SubscriptionProducts");
+
+        modelBuilder.Entity<PhysicalProduct>().OwnsOne(p => p.Dimensions, d =>
+        {
+            d.Property(x => x.LengthCm).HasColumnName("DimLengthCm").HasPrecision(9, 2);
+            d.Property(x => x.WidthCm).HasColumnName("DimWidthCm").HasPrecision(9, 2);
+            d.Property(x => x.HeightCm).HasColumnName("DimHeightCm").HasPrecision(9, 2);
+        });
     }
 
     private static void ConfigureTpc(ModelBuilder modelBuilder)
