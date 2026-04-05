@@ -3,5 +3,5 @@
 public sealed class ProductCatalog
 {
     public string[] Keywords { get; set; } = Array.Empty<string>();
-    public CatalogAttribute[] Attributes { get; set; } = Array.Empty<CatalogAttribute>();
+    public ICollection<CatalogAttribute> Attributes { get; set; } = [];
 }

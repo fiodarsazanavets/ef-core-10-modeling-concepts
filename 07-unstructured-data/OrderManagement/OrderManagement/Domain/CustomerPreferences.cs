@@ -9,5 +9,5 @@ public sealed class CustomerPreferences
     public string[] FavoriteCategories { get; set; } = Array.Empty<string>();
 
     // “Soft schema” style attributes without a dictionary (easier to query/index)
-    public PreferenceEntry[] Extras { get; set; } = Array.Empty<PreferenceEntry>();
+    public List<PreferenceEntry> Extras { get; set; } = new();
 }

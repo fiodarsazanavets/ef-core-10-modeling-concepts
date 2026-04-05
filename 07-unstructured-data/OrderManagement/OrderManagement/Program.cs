@@ -8,7 +8,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"))
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")) //, sql => sql.UseCompatibilityLevel(170))
            .EnableDetailedErrors()
            .EnableSensitiveDataLogging()
            .LogTo(Console.WriteLine, LogLevel.Information));
@@ -192,6 +192,25 @@ app.MapGet("/customers/by-theme/{theme}", async (AppDbContext db, string theme) 
         .Where(c => c.Preferences.Ui.Theme == theme)
         .OrderBy(c => c.Id)
         .ToListAsync());
+
+app.MapGet("/customers/by-prefered-category/{category}", async (AppDbContext db, string theme) =>
+    await db.Customers.AsNoTracking()
+        .Where(c => c.Preferences.FavoriteCategories.Contains(theme))
+        .OrderBy(c => c.Id)
+        .ToListAsync());
+
+// Theme update JSON property
+app.MapPost("/customers/theme/{theme}", async (AppDbContext db, string theme) =>
+{
+    foreach (var customer in db.Customers)
+    {
+        customer.Preferences.Ui.Theme = theme;
+    }
+
+    await db.SaveChangesAsync();
+
+    return Results.NoContent();
+});
 
 // Bulk update JSON property (ExecuteUpdate)
 app.MapPost("/customers/theme/bulk/{theme}", async (AppDbContext db, string theme) =>
