@@ -24,32 +24,32 @@ public static class ModernProjectionExamples
             db.OrderHdrs
                 .Join(
                     db.Customers,
-                    h => h.CustId,
-                    c => c.CustId,
+                    h => h.CustomerId,
+                    c => c.CustomerId,
                     (h, c) => new { h, c })
                 .Join(
-                    db.lkp_OrderStatuses,
+                    db.OrderStatuses,
                     hc => hc.h.StatusCode,
                     s => s.StatusCode,
                     (hc, s) => new { hc.h, hc.c, s })
                 .LeftJoin(
                     db.Employees,
-                    hcs => hcs.h.SalesRepEmpID,
-                    e => e.EmpID,
+                    hcs => hcs.h.SalesRepEmployeeId,
+                    e => e.EmployeeId,
                     (hcs, e) => new { hcs.h, hcs.c, hcs.s, SalesRep = e })
                 .Join(
                     lineTotals,
-                    x => x.h.OrderID,
+                    x => x.h.OrderId,
                     lt => lt.OrderId,
                     (x, lt) => new ModernOrderProjection
                     {
-                        OrderId = x.h.OrderID,
-                        OrderNo = x.h.OrderNo,
-                        CustomerName = x.c.Cust_Nm,
+                        OrderId = x.h.OrderId,
+                        OrderNo = x.h.OrderNumber,
+                        CustomerName = x.c.Name,
                         StatusName = x.s.StatusName,
-                        SalesRepName = x.SalesRep != null ? x.SalesRep.FullNm : "[Unassigned]",
+                        SalesRepName = x.SalesRep != null ? x.SalesRep.FullName : "[Unassigned]",
                         TotalQuantity = lt.TotalQuantity,
-                        NetAmount = lt.GrossAmount - (decimal)(x.h.HeaderDiscountAmt ?? 0)
+                        NetAmount = lt.GrossAmount - (decimal)(x.h.HeaderDiscountAmount ?? 0)
                     });
 
         return await query
@@ -64,19 +64,19 @@ public static class ModernProjectionExamples
             db.OrderDtls
                 .Join(
                     db.OrderHdrs,
-                    d => d.OrderID,
-                    h => h.OrderID,
+                    d => d.OrderId,
+                    h => h.OrderId,
                     (d, h) => new { d, h })
                 .RightJoin(
                     db.ProductCatalogs,
-                    dh => dh.d.ProductID,
-                    p => p.ProductID,
+                    dh => dh.d.ProductId,
+                    p => p.ProductId,
                     (dh, p) => new ProductOrderCoverageDto
                     {
-                        SKU = p.SKU,
-                        ProductName = p.ProductNm,
-                        OrderId = dh != null ? dh.h.OrderID : null,
-                        OrderNo = dh != null ? dh.h.OrderNo : null
+                        SKU = p.Sku,
+                        ProductName = p.Name,
+                        OrderId = dh != null ? dh.h.OrderId : null,
+                        OrderNo = dh != null ? dh.h.OrderNumber : null
                     });
 
         return await query

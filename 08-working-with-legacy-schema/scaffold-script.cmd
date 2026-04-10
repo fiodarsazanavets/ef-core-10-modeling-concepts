@@ -4,8 +4,8 @@ dotnet ef dbcontext scaffold ^
   --context LegacySalesDbContext ^
   --context-dir Data/Context ^
   --output-dir Data/Scaffolded/Entities ^
-  --namespace ContosoLegacySales.Data.Scaffolded.Entities ^
-  --context-namespace ContosoLegacySales.Data.Context ^
+  --namespace ScaffoldedLegacyApp.Data.Scaffolded.Entities ^
+  --context-namespace ScaffoldedLegacyApp.Data.Context ^
   --schema crm ^
   --schema sales ^
   --schema ref ^
